@@ -6,14 +6,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Keep your existing checkout session endpoint for compatibility
 app.post('/create-checkout-session', async (req, res) => {
   try {
     const { amount, listingId, checkIn, checkOut, nights, guests, propertyName, cleaningFee } = req.body;
     
-    // Use the cleaning fee sent from frontend, or default to $150
-    const actualCleaningFee = cleaningFee || 15000; // $150 in cents as default
-    const serviceFee = Math.round(amount * 0.12); // 12% service fee
-    const taxes = Math.round((amount + actualCleaningFee + serviceFee) * 0.08); // 8% tax
+    const actualCleaningFee = cleaningFee || 15000;
+    const serviceFee = Math.round(amount * 0.12);
+    const taxes = Math.round((amount + actualCleaningFee + serviceFee) * 0.08);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -34,9 +34,7 @@ app.post('/create-checkout-session', async (req, res) => {
         {
           price_data: {
             currency: 'usd',
-            product_data: {
-              name: 'Cleaning Fee',
-            },
+            product_data: { name: 'Cleaning Fee' },
             unit_amount: actualCleaningFee,
           },
           quantity: 1,
@@ -44,9 +42,7 @@ app.post('/create-checkout-session', async (req, res) => {
         {
           price_data: {
             currency: 'usd',
-            product_data: {
-              name: 'Service Fee',
-            },
+            product_data: { name: 'Service Fee' },
             unit_amount: serviceFee,
           },
           quantity: 1,
@@ -54,9 +50,7 @@ app.post('/create-checkout-session', async (req, res) => {
         {
           price_data: {
             currency: 'usd',
-            product_data: {
-              name: 'Taxes',
-            },
+            product_data: { name: 'Taxes' },
             unit_amount: taxes,
           },
           quantity: 1,
@@ -69,6 +63,36 @@ app.post('/create-checkout-session', async (req, res) => {
 
     res.json({ id: session.id });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// New endpoint for the custom checkout page
+app.post('/create-payment-intent', async (req, res) => {
+  try {
+    const { amount, email, name, phone, booking } = req.body;
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount,
+      currency: 'usd',
+      metadata: {
+        customer_email: email,
+        customer_name: name,
+        customer_phone: phone,
+        check_in: booking.checkIn,
+        check_out: booking.checkOut,
+        nights: booking.nights.toString(),
+        guests: booking.guests.toString(),
+        base_rate: booking.baseRate.toString(),
+        cleaning_fee: booking.cleaningFee.toString()
+      }
+    });
+
+    res.json({
+      client_secret: paymentIntent.client_secret
+    });
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
     res.status(500).json({ error: error.message });
   }
 });
