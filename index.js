@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Keep your existing checkout session endpoint for compatibility
+// Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
   try {
     const { amount, listingId, checkIn, checkOut, nights, guests, propertyName, cleaningFee } = req.body;
@@ -67,10 +67,22 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// New endpoint for the custom checkout page
+// New secure payment intent endpoint
 app.post('/create-payment-intent', async (req, res) => {
   try {
     const { amount, email, name, phone, booking } = req.body;
+
+    // Server-side validation
+    const { checkInDate, checkOutDate, nights, baseRate, cleaningFee } = booking;
+    
+    // Validate dates
+    const checkIn = new Date(checkInDate);
+    const checkOut = new Date(checkOutDate);
+    const calculatedNights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+    
+    if (calculatedNights !== nights) {
+      return res.status(400).json({ error: 'Invalid booking dates' });
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount,
@@ -79,12 +91,12 @@ app.post('/create-payment-intent', async (req, res) => {
         customer_email: email,
         customer_name: name,
         customer_phone: phone,
-        check_in: booking.checkIn,
-        check_out: booking.checkOut,
-        nights: booking.nights.toString(),
+        check_in: checkInDate,
+        check_out: checkOutDate,
+        nights: nights.toString(),
         guests: booking.guests.toString(),
-        base_rate: booking.baseRate.toString(),
-        cleaning_fee: booking.cleaningFee.toString()
+        base_rate: baseRate.toString(),
+        cleaning_fee: cleaningFee.toString()
       }
     });
 
