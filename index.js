@@ -4,8 +4,8 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 app.use('/webhook', express.raw({type: 'application/json'}));
+app.use(express.json());
 
 // In-memory storage for bookings by property
 let bookingsByProperty = {};
