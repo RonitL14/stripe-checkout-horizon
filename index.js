@@ -38,20 +38,6 @@ const PROPERTY_MAP = {
   }
 };
 
-// Date parsing function to convert "Dec 3" to proper dates
-function parseTextDate(dateText) {
-  // Parse "Dec 3" style dates and assume 2025
-  const date = new Date(`${dateText} 2025`);
-  
-  // If the parsed date is invalid or in the past, try 2026
-  if (isNaN(date.getTime()) || date < new Date()) {
-    const futureDate = new Date(`${dateText} 2026`);
-    return futureDate.toISOString().split('T')[0];
-  }
-  
-  return date.toISOString().split('T')[0];
-}
-
 // Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
     console.log('🚀 ENDPOINT HIT - Request received');
@@ -227,8 +213,8 @@ app.post('/webhook', async (req, res) => {
       guestName: paymentIntent.metadata.customer_name,
       email: paymentIntent.metadata.customer_email,
       phone: paymentIntent.metadata.customer_phone,
-      checkIn: parseTextDate(paymentIntent.metadata.check_in),
-      checkOut: parseTextDate(paymentIntent.metadata.check_out),
+      checkIn: paymentIntent.metadata.check_in,
+      checkOut: paymentIntent.metadata.check_out,
       nights: parseInt(paymentIntent.metadata.nights),
       guests: parseInt(paymentIntent.metadata.guests),
       total: (parseInt(paymentIntent.metadata.base_rate) * parseInt(paymentIntent.metadata.nights)) + parseInt(paymentIntent.metadata.cleaning_fee),
