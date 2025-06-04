@@ -10,12 +10,32 @@ app.use('/webhook', express.raw({type: 'application/json'}));
 // In-memory storage for bookings by property
 let bookingsByProperty = {};
 
-// Property IDs (add all your properties here)
-const PROPERTIES = {
-  'cos1': '869f5e1f-223b-4cc2-b64a-a0f4b8194c82', // Colorado Springs
-  'vegas1': 'your-vegas-property-id',
-  'miami1': 'your-miami-property-id'
-  // Add more properties as needed
+// AUTO-DETECT PROPERTIES - Map Hospitable Listing IDs to Property Codes
+const PROPERTY_MAP = {
+  '869f5e1f-223b-4cc2-b64a-a0f4b8194c82': { // Colorado Springs (your current one)
+    code: 'cos1',
+    name: 'Colorado Springs Retreat'
+  },
+  'your-vegas-listing-id': {
+    code: 'vegas1', 
+    name: 'Vegas Villa'
+  },
+  'your-miami-listing-id': {
+    code: 'miami1',
+    name: 'Miami Beach House'
+  },
+  'your-austin-listing-id': {
+    code: 'austin1',
+    name: 'Austin Downtown Loft'
+  },
+  'your-denver-listing-id': {
+    code: 'denver1',
+    name: 'Denver Mountain Lodge'
+  },
+  'your-phoenix-listing-id': {
+    code: 'phoenix1',
+    name: 'Phoenix Desert Villa'
+  }
 };
 
 // Keep existing checkout session endpoint
@@ -78,10 +98,10 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// Payment intent endpoint with property ID
+// Payment intent endpoint - AUTO-DETECTS PROPERTY FROM LISTING_ID
 app.post('/create-payment-intent', async (req, res) => {
   try {
-    const { amount, email, name, phone, booking, propertyId } = req.body;
+    const { amount, email, name, phone, booking } = req.body;
     
     const { checkInDate, checkOutDate, nights, baseRate, cleaningFee } = booking;
     
@@ -93,6 +113,12 @@ app.post('/create-payment-intent', async (req, res) => {
     if (calculatedNights !== nights) {
       return res.status(400).json({ error: 'Invalid booking dates' });
     }
+    
+    // AUTO-DETECT PROPERTY - Get LISTING_ID from your booking widget
+    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82'; // Default to Colorado Springs
+    const property = PROPERTY_MAP[listingId];
+    
+    console.log('🏠 Detected property:', listingId, '→', property ? property.name : 'Unknown');
     
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount,
@@ -107,7 +133,8 @@ app.post('/create-payment-intent', async (req, res) => {
         guests: booking.guests.toString(),
         base_rate: baseRate.toString(),
         cleaning_fee: cleaningFee.toString(),
-        property_id: propertyId || 'cos1' // Default to Colorado Springs
+        listing_id: listingId,
+        property_code: property ? property.code : 'cos1'
       }
     });
     
@@ -120,14 +147,14 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// Property-specific iCal endpoints
-app.get('/calendar/:propertyId.ics', (req, res) => {
-  const propertyId = req.params.propertyId;
-  const propertyBookings = bookingsByProperty[propertyId] || [];
+// Property-specific iCal endpoints for ALL PROPERTIES
+app.get('/calendar/:propertyCode.ics', (req, res) => {
+  const propertyCode = req.params.propertyCode;
+  const propertyBookings = bookingsByProperty[propertyCode] || [];
   
   let icalContent = `BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//HRZN//Direct Bookings ${propertyId.toUpperCase()}//EN`;
+PRODID:-//HRZN//Direct Bookings ${propertyCode.toUpperCase()}//EN`;
 
   propertyBookings.forEach(booking => {
     const checkInDate = new Date(booking.checkIn).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -151,7 +178,7 @@ END:VCALENDAR`;
   res.send(icalContent);
 });
 
-// Webhook to handle successful payments
+// Webhook - AUTO-CREATES BOOKINGS BY PROPERTY
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -168,9 +195,11 @@ app.post('/webhook', async (req, res) => {
     
     console.log('💰 Payment succeeded, creating booking...');
     
-    const propertyId = paymentIntent.metadata.property_id || 'cos1';
+    // Get property info from metadata
+    const listingId = paymentIntent.metadata.listing_id || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82';
+    const propertyCode = paymentIntent.metadata.property_code || 'cos1';
+    const property = PROPERTY_MAP[listingId];
     
-    // Create booking object
     const booking = {
       id: paymentIntent.id,
       paymentId: paymentIntent.id,
@@ -182,44 +211,34 @@ app.post('/webhook', async (req, res) => {
       nights: parseInt(paymentIntent.metadata.nights),
       guests: parseInt(paymentIntent.metadata.guests),
       total: (parseInt(paymentIntent.metadata.base_rate) * parseInt(paymentIntent.metadata.nights)) + parseInt(paymentIntent.metadata.cleaning_fee),
-      propertyId: propertyId,
-      propertyName: getPropertyName(propertyId),
+      propertyCode: propertyCode,
+      propertyName: property ? property.name : 'HRZN Property',
+      listingId: listingId,
       createdAt: new Date().toISOString()
     };
 
     // Initialize property array if doesn't exist
-    if (!bookingsByProperty[propertyId]) {
-      bookingsByProperty[propertyId] = [];
+    if (!bookingsByProperty[propertyCode]) {
+      bookingsByProperty[propertyCode] = [];
     }
 
-    // Add booking to property-specific array
-    bookingsByProperty[propertyId].push(booking);
+    bookingsByProperty[propertyCode].push(booking);
     
-    console.log(`✅ Booking created for property ${propertyId}:`, booking);
-    console.log(`📊 Total bookings for ${propertyId}:`, bookingsByProperty[propertyId].length);
+    console.log(`✅ Booking created for ${property ? property.name : 'Unknown Property'}:`, booking);
+    console.log(`📊 Total bookings for ${propertyCode}:`, bookingsByProperty[propertyCode].length);
   }
 
   res.json({received: true});
 });
 
-// Helper function to get property name
-function getPropertyName(propertyId) {
-  const names = {
-    'cos1': 'Colorado Springs Retreat',
-    'vegas1': 'Vegas Villa',
-    'miami1': 'Miami Beach House'
-  };
-  return names[propertyId] || 'HRZN Property';
-}
-
-// Debug endpoint to view bookings by property
-app.get('/bookings/:propertyId?', (req, res) => {
-  const propertyId = req.params.propertyId;
+// Debug endpoint to view all bookings
+app.get('/bookings/:propertyCode?', (req, res) => {
+  const propertyCode = req.params.propertyCode;
   
-  if (propertyId) {
+  if (propertyCode) {
     res.json({
-      property: propertyId,
-      bookings: bookingsByProperty[propertyId] || []
+      property: propertyCode,
+      bookings: bookingsByProperty[propertyCode] || []
     });
   } else {
     res.json(bookingsByProperty);
