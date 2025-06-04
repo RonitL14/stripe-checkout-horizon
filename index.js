@@ -40,6 +40,7 @@ const PROPERTY_MAP = {
 
 // Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
+    console.log('🚀 ENDPOINT HIT - Request received');
   try {
     const { amount, listingId, checkIn, checkOut, nights, guests, propertyName, cleaningFee } = req.body;
     
