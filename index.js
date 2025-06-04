@@ -104,7 +104,7 @@ app.post('/create-payment-intent', async (req, res) => {
   try {
     const { amount, email, name, phone, booking } = req.body;
     
-    const { checkInDate, checkOutDate, nights, baseRate, cleaningFee } = booking;
+    const { checkIn: checkInDate, checkOut: checkOutDate, nights, baseRate, cleaningFee } = booking;
 
     // ADD THESE DEBUG LINES HERE:
     console.log('🔍 Full request body:', req.body);
