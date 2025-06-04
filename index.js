@@ -104,6 +104,12 @@ app.post('/create-payment-intent', async (req, res) => {
     const { amount, email, name, phone, booking } = req.body;
     
     const { checkInDate, checkOutDate, nights, baseRate, cleaningFee } = booking;
+
+    // ADD THESE DEBUG LINES HERE:
+    console.log('🔍 Full request body:', req.body);
+    console.log('🔍 Booking data received:', booking);
+    console.log('🔍 CheckIn:', checkInDate, 'CheckOut:', checkOutDate);
+    console.log('🔍 Amount:', amount, 'Nights:', nights);
     
     // Validate dates
     const checkIn = new Date(checkInDate);
