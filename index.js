@@ -38,6 +38,24 @@ const PROPERTY_MAP = {
   }
 };
 
+// Test the date parsing function before adding to your backend
+function parseTextDate(dateText) {
+  const date = new Date(`${dateText} 2025`);
+  if (isNaN(date.getTime()) || date < new Date()) {
+    const futureDate = new Date(`${dateText} 2026`);
+    return futureDate.toISOString().split('T')[0];
+  }
+  return date.toISOString().split('T')[0];
+}
+
+// Test with your actual data
+console.log("Testing date conversion:");
+console.log("'Dec 10' becomes:", parseTextDate('Dec 10'));
+console.log("'Dec 14' becomes:", parseTextDate('Dec 14'));
+
+// Test edge cases
+console.log("'Jan 5' becomes:", parseTextDate('Jan 5'));
+console.log("'Feb 28' becomes:", parseTextDate('Feb 28'));
 // Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
     console.log('🚀 ENDPOINT HIT - Request received');
