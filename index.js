@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
@@ -7,8 +9,38 @@ app.use(cors());
 app.use('/webhook', express.raw({type: 'application/json'}));
 app.use(express.json());
 
-// In-memory storage for bookings by property
+// File path for persistent storage
+const BOOKINGS_FILE = path.join(__dirname, 'bookings.json');
+
+// Load bookings from file on startup
 let bookingsByProperty = {};
+
+function loadBookings() {
+  try {
+    if (fs.existsSync(BOOKINGS_FILE)) {
+      const data = fs.readFileSync(BOOKINGS_FILE, 'utf8');
+      bookingsByProperty = JSON.parse(data);
+      console.log('📚 Loaded existing bookings from file');
+    } else {
+      console.log('📚 No existing bookings file found, starting fresh');
+    }
+  } catch (error) {
+    console.error('❌ Error loading bookings:', error);
+    bookingsByProperty = {};
+  }
+}
+
+function saveBookings() {
+  try {
+    fs.writeFileSync(BOOKINGS_FILE, JSON.stringify(bookingsByProperty, null, 2));
+    console.log('💾 Bookings saved to file');
+  } catch (error) {
+    console.error('❌ Error saving bookings:', error);
+  }
+}
+
+// Load bookings on startup
+loadBookings();
 
 // AUTO-DETECT PROPERTIES - Map Hospitable Listing IDs to Property Codes
 const PROPERTY_MAP = {
@@ -38,7 +70,7 @@ const PROPERTY_MAP = {
   }
 };
 
-// Test the date parsing function before adding to your backend
+// Date parsing function to convert "Dec 10" to proper dates
 function parseTextDate(dateText) {
   const date = new Date(`${dateText} 2025`);
   if (isNaN(date.getTime()) || date < new Date()) {
@@ -48,14 +80,6 @@ function parseTextDate(dateText) {
   return date.toISOString().split('T')[0];
 }
 
-// Test with your actual data
-console.log("Testing date conversion:");
-console.log("'Dec 10' becomes:", parseTextDate('Dec 10'));
-console.log("'Dec 14' becomes:", parseTextDate('Dec 14'));
-
-// Test edge cases
-console.log("'Jan 5' becomes:", parseTextDate('Jan 5'));
-console.log("'Feb 28' becomes:", parseTextDate('Feb 28'));
 // Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
     console.log('🚀 ENDPOINT HIT - Request received');
@@ -203,6 +227,44 @@ END:VCALENDAR`;
   res.send(icalContent);
 });
 
+// Delete booking endpoint - PROTECTED with password
+app.delete('/bookings/:propertyCode/:bookingId', (req, res) => {
+  // Check for admin password
+  const authPassword = req.headers['x-admin-password'];
+  if (!authPassword || authPassword !== process.env.ADMIN_PASSWORD) {
+    console.log('🚫 Unauthorized delete attempt');
+    return res.status(401).json({ error: 'Unauthorized - Admin password required' });
+  }
+  
+  const { propertyCode, bookingId } = req.params;
+  
+  if (!bookingsByProperty[propertyCode]) {
+    return res.status(404).json({ error: 'Property not found' });
+  }
+  
+  const bookingIndex = bookingsByProperty[propertyCode].findIndex(
+    booking => booking.id === bookingId
+  );
+  
+  if (bookingIndex === -1) {
+    return res.status(404).json({ error: 'Booking not found' });
+  }
+  
+  // Remove the booking
+  const deletedBooking = bookingsByProperty[propertyCode].splice(bookingIndex, 1)[0];
+  
+  // Save to file
+  saveBookings();
+  
+  console.log(`🗑️ Admin deleted booking: ${deletedBooking.guestName} (${deletedBooking.id})`);
+  
+  res.json({ 
+    message: 'Booking deleted successfully',
+    deletedBooking: deletedBooking,
+    remainingBookings: bookingsByProperty[propertyCode].length
+  });
+});
+
 // Webhook - AUTO-CREATES BOOKINGS BY PROPERTY
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -248,6 +310,9 @@ app.post('/webhook', async (req, res) => {
     }
 
     bookingsByProperty[propertyCode].push(booking);
+    
+    // Save to file after adding booking
+    saveBookings();
     
     console.log(`✅ Booking created for ${property ? property.name : 'Unknown Property'}:`, booking);
     console.log(`📊 Total bookings for ${propertyCode}:`, bookingsByProperty[propertyCode].length);
