@@ -417,10 +417,20 @@ app.get('/test-klaviyo', async (req, res) => {
           type: "event",
           attributes: {
             profile: {
-              email: "ronitlodd@gmail.com"
+              data: {
+                type: "profile",
+                attributes: {
+                  email: "ronitlodd@gmail.com"
+                }
+              }
             },
             metric: {
-              name: "New Booking Alert"
+              data: {
+                type: "metric",
+                attributes: {
+                  name: "New Booking Alert"
+                }
+              }
             },
             properties: {
               guest_name: testBooking.guestName,
@@ -452,7 +462,6 @@ app.get('/test-klaviyo', async (req, res) => {
     res.json({ success: false, error: error.message });
   }
 });
-// Test Klaviyo notification endpoint
 
 
 
