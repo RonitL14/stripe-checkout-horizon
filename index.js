@@ -383,4 +383,77 @@ app.get('/bookings/:propertyCode?', (req, res) => {
   }
 });
 
+
+
+// Test Klaviyo notification endpoint
+app.get('/test-klaviyo', async (req, res) => {
+  const testBooking = {
+    guestName: 'Test Guest',
+    email: 'test@email.com',
+    phone: '555-123-4567',
+    checkIn: '2025-07-01',
+    checkOut: '2025-07-03',
+    nights: 2,
+    guests: 4,
+    total: 1200,
+    propertyName: 'Colorado Springs Retreat',
+    propertyCode: 'cos1',
+    listingId: '869f5e1f-223b-4cc2-b64a-a0f4b8194c82',
+    paymentId: 'test_payment_123',
+    id: 'test_booking_123',
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const response = await fetch('https://a.klaviyo.com/api/events/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
+        'Content-Type': 'application/json',
+        'revision': '2024-10-15'
+      },
+      body: JSON.stringify({
+        data: {
+          type: "event",
+          attributes: {
+            profile: {
+              email: "ronitlodd@gmail.com"
+            },
+            metric: {
+              name: "New Booking Alert"
+            },
+            properties: {
+              guest_name: testBooking.guestName,
+              guest_email: testBooking.email,
+              guest_phone: testBooking.phone,
+              check_in: testBooking.checkIn,
+              check_out: testBooking.checkOut,
+              nights: testBooking.nights,
+              guests: testBooking.guests,
+              total_amount: testBooking.total,
+              property_name: testBooking.propertyName,
+              property_code: testBooking.propertyCode,
+              listing_id: testBooking.listingId,
+              payment_id: testBooking.paymentId,
+              booking_id: testBooking.id,
+              created_at: testBooking.createdAt
+            }
+          }
+        }
+      })
+    });
+
+    if (response.ok) {
+      res.json({ success: true, message: 'Test notification sent to Klaviyo!' });
+    } else {
+      res.json({ success: false, error: await response.text() });
+    }
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+// Test Klaviyo notification endpoint
+
+
+
 app.listen(3000, () => console.log("Server running on port 3000"));
