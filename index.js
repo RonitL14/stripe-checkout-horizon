@@ -315,6 +315,54 @@ app.post('/webhook', async (req, res) => {
     saveBookings();
     
     console.log(`✅ Booking created for ${property ? property.name : 'Unknown Property'}:`, booking);
+    // Send booking notification to Klaviyo
+try {
+  const response = await fetch('https://a.klaviyo.com/api/events/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
+      'Content-Type': 'application/json',
+      'revision': '2024-10-15'
+    },
+    body: JSON.stringify({
+      data: {
+        type: "event",
+        attributes: {
+          profile: {
+            email: "ronitlodd@gmail.com"
+          },
+          metric: {
+            name: "New Booking Alert"
+          },
+          properties: {
+            guest_name: booking.guestName,
+            guest_email: booking.email,
+            guest_phone: booking.phone,
+            check_in: booking.checkIn,
+            check_out: booking.checkOut,
+            nights: booking.nights,
+            guests: booking.guests,
+            total_amount: booking.total,
+            property_name: booking.propertyName,
+            property_code: booking.propertyCode,
+            listing_id: booking.listingId,
+            payment_id: booking.paymentId,
+            booking_id: booking.id,
+            created_at: booking.createdAt
+          }
+        }
+      }
+    })
+  });
+
+  if (response.ok) {
+    console.log('📧 Booking notification sent to Klaviyo successfully');
+  } else {
+    console.error('❌ Failed to send to Klaviyo:', await response.text());
+  }
+} catch (error) {
+  console.error('❌ Error sending booking notification:', error);
+}
     console.log(`📊 Total bookings for ${propertyCode}:`, bookingsByProperty[propertyCode].length);
   }
 
