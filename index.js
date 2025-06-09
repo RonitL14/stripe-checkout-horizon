@@ -262,8 +262,8 @@ app.post('/create-payment-intent', async (req, res) => {
       user_email: email,
       user_name: name,
       amount: amount,
-      check_in: checkInDate,
-      check_out: checkOutDate,
+      check_in: booking.checkInDate,
+      check_out: booking.checkOutDate,
       listing_id: booking.listingId
     });
     res.status(500).json({ error: error.message });
