@@ -12,7 +12,7 @@ app.use(express.json());
 // ERROR ALERT FUNCTION - ADDED
 async function emailError(errorType, errorDetails) {
   try {
-    await fetch('https://a.klaviyo.com/api/events/', {
+    const response = await fetch('https://a.klaviyo.com/api/events/', {
       method: 'POST',
       headers: {
         'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
@@ -48,8 +48,14 @@ async function emailError(errorType, errorDetails) {
         }
       })
     });
+
+    if (response.ok) {
+      console.log('📧 Error alert sent to Klaviyo successfully');
+    } else {
+      console.error('❌ Failed to send error alert to Klaviyo:', await response.text());
+    }
   } catch (e) {
-    console.log('Failed to send error to Klaviyo');
+    console.log('❌ Failed to send error alert to Klaviyo:', e.message);
   }
 }
 
