@@ -9,6 +9,50 @@ app.use(cors());
 app.use('/webhook', express.raw({type: 'application/json'}));
 app.use(express.json());
 
+// ERROR ALERT FUNCTION - ADDED
+async function emailError(errorType, errorDetails) {
+  try {
+    await fetch('https://a.klaviyo.com/api/events/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
+        'Content-Type': 'application/json',
+        'revision': '2024-10-15'
+      },
+      body: JSON.stringify({
+        data: {
+          type: "event",
+          attributes: {
+            profile: {
+              data: {
+                type: "profile",
+                attributes: {
+                  email: "ronitlodd@gmail.com"
+                }
+              }
+            },
+            metric: {
+              data: {
+                type: "metric",
+                attributes: {
+                  name: "System Error Alert"
+                }
+              }
+            },
+            properties: {
+              error_type: errorType,
+              timestamp: new Date().toISOString(),
+              ...errorDetails
+            }
+          }
+        }
+      })
+    });
+  } catch (e) {
+    console.log('Failed to send error to Klaviyo');
+  }
+}
+
 // File path for persistent storage
 const BOOKINGS_FILE = path.join(__dirname, 'bookings.json');
 
@@ -26,6 +70,10 @@ function loadBookings() {
     }
   } catch (error) {
     console.error('❌ Error loading bookings:', error);
+    emailError('FILE_LOAD_FAILED', {
+      error: error.message,
+      file: BOOKINGS_FILE
+    });
     bookingsByProperty = {};
   }
 }
@@ -36,6 +84,10 @@ function saveBookings() {
     console.log('💾 Bookings saved to file');
   } catch (error) {
     console.error('❌ Error saving bookings:', error);
+    emailError('FILE_SAVE_FAILED', {
+      error: error.message,
+      file: BOOKINGS_FILE
+    });
   }
 }
 
@@ -137,6 +189,13 @@ app.post('/create-checkout-session', async (req, res) => {
     
     res.json({ id: session.id });
   } catch (error) {
+    emailError('STRIPE_CHECKOUT_SESSION_FAILED', {
+      error: error.message,
+      amount: amount,
+      listing_id: listingId,
+      check_in: checkIn,
+      check_out: checkOut
+    });
     res.status(500).json({ error: error.message });
   }
 });
@@ -192,24 +251,34 @@ app.post('/create-payment-intent', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating payment intent:', error);
+    emailError('STRIPE_PAYMENT_INTENT_FAILED', {
+      error: error.message,
+      user_email: email,
+      user_name: name,
+      amount: amount,
+      check_in: booking.checkIn,
+      check_out: booking.checkOut,
+      listing_id: booking.listingId
+    });
     res.status(500).json({ error: error.message });
   }
 });
 
 // Property-specific iCal endpoints for ALL PROPERTIES
 app.get('/calendar/:propertyCode.ics', (req, res) => {
-  const propertyCode = req.params.propertyCode;
-  const propertyBookings = bookingsByProperty[propertyCode] || [];
-  
-  let icalContent = `BEGIN:VCALENDAR
+  try {
+    const propertyCode = req.params.propertyCode;
+    const propertyBookings = bookingsByProperty[propertyCode] || [];
+    
+    let icalContent = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//HRZN//Direct Bookings ${propertyCode.toUpperCase()}//EN`;
 
-  propertyBookings.forEach(booking => {
-    const checkInDate = new Date(booking.checkIn).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    const checkOutDate = new Date(booking.checkOut).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    
-    icalContent += `
+    propertyBookings.forEach(booking => {
+      const checkInDate = new Date(booking.checkIn).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const checkOutDate = new Date(booking.checkOut).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      
+      icalContent += `
 BEGIN:VEVENT
 UID:${booking.id}@hrzn.com
 DTSTART:${checkInDate}
@@ -218,51 +287,67 @@ SUMMARY:${booking.guestName} - Direct Booking
 DESCRIPTION:Guest: ${booking.guestName}\\nEmail: ${booking.email}\\nPhone: ${booking.phone}\\nGuests: ${booking.guests}\\nTotal: $${booking.total}\\nPayment ID: ${booking.paymentId}\\nSource: HRZN Website
 LOCATION:${booking.propertyName}
 END:VEVENT`;
-  });
+    });
 
-  icalContent += `
+    icalContent += `
 END:VCALENDAR`;
 
-  res.setHeader('Content-Type', 'text/calendar');
-  res.send(icalContent);
+    res.setHeader('Content-Type', 'text/calendar');
+    res.send(icalContent);
+  } catch (error) {
+    emailError('CALENDAR_GENERATION_FAILED', {
+      error: error.message,
+      property_code: req.params.propertyCode
+    });
+    res.status(500).json({ error: 'Failed to generate calendar' });
+  }
 });
 
 // Delete booking endpoint - PROTECTED with password
 app.delete('/bookings/:propertyCode/:bookingId', (req, res) => {
-  // Check for admin password
-  const authPassword = req.headers['x-admin-password'];
-  if (!authPassword || authPassword !== process.env.ADMIN_PASSWORD) {
-    console.log('🚫 Unauthorized delete attempt');
-    return res.status(401).json({ error: 'Unauthorized - Admin password required' });
+  try {
+    // Check for admin password
+    const authPassword = req.headers['x-admin-password'];
+    if (!authPassword || authPassword !== process.env.ADMIN_PASSWORD) {
+      console.log('🚫 Unauthorized delete attempt');
+      return res.status(401).json({ error: 'Unauthorized - Admin password required' });
+    }
+    
+    const { propertyCode, bookingId } = req.params;
+    
+    if (!bookingsByProperty[propertyCode]) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+    
+    const bookingIndex = bookingsByProperty[propertyCode].findIndex(
+      booking => booking.id === bookingId
+    );
+    
+    if (bookingIndex === -1) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    
+    // Remove the booking
+    const deletedBooking = bookingsByProperty[propertyCode].splice(bookingIndex, 1)[0];
+    
+    // Save to file
+    saveBookings();
+    
+    console.log(`🗑️ Admin deleted booking: ${deletedBooking.guestName} (${deletedBooking.id})`);
+    
+    res.json({ 
+      message: 'Booking deleted successfully',
+      deletedBooking: deletedBooking,
+      remainingBookings: bookingsByProperty[propertyCode].length
+    });
+  } catch (error) {
+    emailError('BOOKING_DELETE_FAILED', {
+      error: error.message,
+      property_code: req.params.propertyCode,
+      booking_id: req.params.bookingId
+    });
+    res.status(500).json({ error: 'Failed to delete booking' });
   }
-  
-  const { propertyCode, bookingId } = req.params;
-  
-  if (!bookingsByProperty[propertyCode]) {
-    return res.status(404).json({ error: 'Property not found' });
-  }
-  
-  const bookingIndex = bookingsByProperty[propertyCode].findIndex(
-    booking => booking.id === bookingId
-  );
-  
-  if (bookingIndex === -1) {
-    return res.status(404).json({ error: 'Booking not found' });
-  }
-  
-  // Remove the booking
-  const deletedBooking = bookingsByProperty[propertyCode].splice(bookingIndex, 1)[0];
-  
-  // Save to file
-  saveBookings();
-  
-  console.log(`🗑️ Admin deleted booking: ${deletedBooking.guestName} (${deletedBooking.id})`);
-  
-  res.json({ 
-    message: 'Booking deleted successfully',
-    deletedBooking: deletedBooking,
-    remainingBookings: bookingsByProperty[propertyCode].length
-  });
 });
 
 // Webhook - AUTO-CREATES BOOKINGS BY PROPERTY
@@ -274,6 +359,10 @@ app.post('/webhook', async (req, res) => {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     console.log(`Webhook signature verification failed:`, err.message);
+    emailError('WEBHOOK_SIGNATURE_FAILED', {
+      error: err.message,
+      headers: req.headers
+    });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -309,12 +398,24 @@ app.post('/webhook', async (req, res) => {
       bookingsByProperty[propertyCode] = [];
     }
 
-    bookingsByProperty[propertyCode].push(booking);
+    try {
+      bookingsByProperty[propertyCode].push(booking);
+      
+      // Save to file after adding booking
+      saveBookings();
+      
+      console.log(`✅ Booking created for ${property ? property.name : 'Unknown Property'}:`, booking);
+    } catch (error) {
+      emailError('BOOKING_CREATION_FAILED', {
+        error: error.message,
+        payment_id: paymentIntent.id,
+        guest_name: paymentIntent.metadata.customer_name,
+        guest_email: paymentIntent.metadata.customer_email,
+        property_code: propertyCode
+      });
+      console.error('❌ Failed to create booking:', error);
+    }
     
-    // Save to file after adding booking
-    saveBookings();
-    
-    console.log(`✅ Booking created for ${property ? property.name : 'Unknown Property'}:`, booking);
     // Send booking notification to Klaviyo
 try {
   const response = await fetch('https://a.klaviyo.com/api/events/', {
@@ -372,6 +473,12 @@ try {
   }
 } catch (error) {
   console.error('❌ Error sending booking notification:', error);
+  emailError('KLAVIYO_NOTIFICATION_FAILED', {
+    error: error.message,
+    guest_name: booking.guestName,
+    guest_email: booking.email,
+    booking_id: booking.id
+  });
 }
     console.log(`📊 Total bookings for ${propertyCode}:`, bookingsByProperty[propertyCode].length);
   }
