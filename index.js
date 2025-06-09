@@ -140,10 +140,10 @@ function parseTextDate(dateText) {
 
 // Keep existing checkout session endpoint
 app.post('/create-checkout-session', async (req, res) => {
-    console.log('🚀 ENDPOINT HIT - Request received');
+  console.log('🚀 ENDPOINT HIT - Request received');
+  const { amount, listingId, checkIn, checkOut, nights, guests, propertyName, cleaningFee } = req.body;
+  
   try {
-    const { amount, listingId, checkIn, checkOut, nights, guests, propertyName, cleaningFee } = req.body;
-    
     const actualCleaningFee = cleaningFee || 15000;
     const serviceFee = Math.round(amount * 0.12);
     const taxes = Math.round((amount + actualCleaningFee + serviceFee) * 0.08);
@@ -208,9 +208,9 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // Payment intent endpoint - AUTO-DETECTS PROPERTY FROM LISTING_ID
 app.post('/create-payment-intent', async (req, res) => {
+  const { amount, email, name, phone, booking } = req.body;
+  
   try {
-    const { amount, email, name, phone, booking } = req.body;
-    
     const { checkIn: checkInDate, checkOut: checkOutDate, nights, baseRate, cleaningFee } = booking;
 
     // ADD THESE DEBUG LINES HERE:
@@ -262,8 +262,8 @@ app.post('/create-payment-intent', async (req, res) => {
       user_email: email,
       user_name: name,
       amount: amount,
-      check_in: booking.checkIn,
-      check_out: booking.checkOut,
+      check_in: checkInDate,
+      check_out: checkOutDate,
       listing_id: booking.listingId
     });
     res.status(500).json({ error: error.message });
@@ -272,8 +272,9 @@ app.post('/create-payment-intent', async (req, res) => {
 
 // Property-specific iCal endpoints for ALL PROPERTIES
 app.get('/calendar/:propertyCode.ics', (req, res) => {
+  const propertyCode = req.params.propertyCode;
+  
   try {
-    const propertyCode = req.params.propertyCode;
     const propertyBookings = bookingsByProperty[propertyCode] || [];
     
     let icalContent = `BEGIN:VCALENDAR
@@ -303,7 +304,7 @@ END:VCALENDAR`;
   } catch (error) {
     emailError('CALENDAR_GENERATION_FAILED', {
       error: error.message,
-      property_code: req.params.propertyCode
+      property_code: propertyCode
     });
     res.status(500).json({ error: 'Failed to generate calendar' });
   }
@@ -311,6 +312,8 @@ END:VCALENDAR`;
 
 // Delete booking endpoint - PROTECTED with password
 app.delete('/bookings/:propertyCode/:bookingId', (req, res) => {
+  const { propertyCode, bookingId } = req.params;
+  
   try {
     // Check for admin password
     const authPassword = req.headers['x-admin-password'];
@@ -318,8 +321,6 @@ app.delete('/bookings/:propertyCode/:bookingId', (req, res) => {
       console.log('🚫 Unauthorized delete attempt');
       return res.status(401).json({ error: 'Unauthorized - Admin password required' });
     }
-    
-    const { propertyCode, bookingId } = req.params;
     
     if (!bookingsByProperty[propertyCode]) {
       return res.status(404).json({ error: 'Property not found' });
@@ -349,8 +350,8 @@ app.delete('/bookings/:propertyCode/:bookingId', (req, res) => {
   } catch (error) {
     emailError('BOOKING_DELETE_FAILED', {
       error: error.message,
-      property_code: req.params.propertyCode,
-      booking_id: req.params.bookingId
+      property_code: propertyCode,
+      booking_id: bookingId
     });
     res.status(500).json({ error: 'Failed to delete booking' });
   }
