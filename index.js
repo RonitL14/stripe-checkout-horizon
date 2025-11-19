@@ -270,6 +270,110 @@ app.post('/create-payment-intent', async (req, res) => {
   }
 });
 
+// 🆕 NEW - Create Bank Session for ACH payments
+app.post('/create-bank-session', async (req, res) => {
+  try {
+    const { email, name, amount, booking } = req.body;
+
+    console.log('🏦 Creating bank session for:', email);
+
+    const session = await stripe.financialConnections.sessions.create({
+      account_holder: {
+        type: 'customer',
+        customer: email,
+      },
+      permissions: ['payment_method', 'balances'],
+      filters: {
+        countries: ['US'],
+      },
+    });
+
+    console.log('✅ Bank session created:', session.id);
+    res.json({ client_secret: session.client_secret });
+  } catch (error) {
+    console.error('❌ Error creating bank session:', error);
+    emailError('BANK_SESSION_CREATION_FAILED', {
+      error: error.message,
+      user_email: req.body.email,
+      user_name: req.body.name
+    });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🆕 NEW - Confirm Bank Payment
+app.post('/confirm-bank-payment', async (req, res) => {
+  try {
+    const { accountId, email, name, phone, booking } = req.body;
+
+    console.log('🏦 Confirming bank payment for:', email, 'Account:', accountId);
+
+    // Create payment method from the linked bank account
+    const paymentMethod = await stripe.paymentMethods.create({
+      type: 'us_bank_account',
+      us_bank_account: {
+        financial_connections_account: accountId,
+      },
+    });
+
+    console.log('✅ Payment method created:', paymentMethod.id);
+
+    // Calculate amount
+    const subtotal = (booking.baseRate * booking.nights) + booking.cleaningFee;
+    const taxAmount = subtotal * (booking.taxRate || 0);
+    const totalWithTax = subtotal + taxAmount;
+    const amount = Math.round(totalWithTax * 100);
+
+    // AUTO-DETECT PROPERTY
+    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82';
+    const property = PROPERTY_MAP[listingId];
+
+    // Create payment intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: 'usd',
+      payment_method: paymentMethod.id,
+      payment_method_types: ['us_bank_account'],
+      confirm: true,
+      mandate_data: {
+        customer_acceptance: {
+          type: 'online',
+          online: {
+            ip_address: req.ip,
+            user_agent: req.headers['user-agent'],
+          },
+        },
+      },
+      metadata: {
+        customer_email: email,
+        customer_name: name,
+        customer_phone: phone,
+        check_in: booking.checkIn,
+        check_out: booking.checkOut,
+        nights: booking.nights.toString(),
+        guests: booking.guests.toString(),
+        base_rate: booking.baseRate.toString(),
+        cleaning_fee: booking.cleaningFee.toString(),
+        listing_id: listingId,
+        property_code: property ? property.code : 'cos1',
+        payment_type: 'ach'
+      }
+    });
+
+    console.log('✅ Bank payment confirmed:', paymentIntent.id);
+    res.json({ success: true, paymentIntent });
+  } catch (error) {
+    console.error('❌ Error confirming bank payment:', error);
+    emailError('BANK_PAYMENT_CONFIRMATION_FAILED', {
+      error: error.message,
+      user_email: req.body.email,
+      user_name: req.body.name,
+      account_id: req.body.accountId
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Property-specific iCal endpoints for ALL PROPERTIES
 app.get('/calendar/:propertyCode.ics', (req, res) => {
   const propertyCode = req.params.propertyCode;
@@ -397,6 +501,7 @@ app.post('/webhook', async (req, res) => {
       propertyCode: propertyCode,
       propertyName: property ? property.name : 'HRZN Property',
       listingId: listingId,
+      paymentType: paymentIntent.metadata.payment_type || 'card',
       createdAt: new Date().toISOString()
     };
 
@@ -424,69 +529,71 @@ app.post('/webhook', async (req, res) => {
     }
     
     // Send booking notification to Klaviyo
-try {
-  const response = await fetch('https://a.klaviyo.com/api/events/', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
-      'Content-Type': 'application/json',
-      'revision': '2024-10-15'
-    },
-    body: JSON.stringify({
-      data: {
-        type: "event",
-        attributes: {
-          profile: {
-            data: {
-              type: "profile",
-              attributes: {
-                email: "ronitlodd@gmail.com"
+    try {
+      const response = await fetch('https://a.klaviyo.com/api/events/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
+          'Content-Type': 'application/json',
+          'revision': '2024-10-15'
+        },
+        body: JSON.stringify({
+          data: {
+            type: "event",
+            attributes: {
+              profile: {
+                data: {
+                  type: "profile",
+                  attributes: {
+                    email: "ronitlodd@gmail.com"
+                  }
+                }
+              },
+              metric: {
+                data: {
+                  type: "metric",
+                  attributes: {
+                    name: "New Booking Alert"
+                  }
+                }
+              },
+              properties: {
+                guest_name: booking.guestName,
+                guest_email: booking.email,
+                guest_phone: booking.phone,
+                check_in: booking.checkIn,
+                check_out: booking.checkOut,
+                nights: booking.nights,
+                guests: booking.guests,
+                total_amount: booking.total,
+                property_name: booking.propertyName,
+                property_code: booking.propertyCode,
+                listing_id: booking.listingId,
+                payment_id: booking.paymentId,
+                payment_type: booking.paymentType,
+                booking_id: booking.id,
+                created_at: booking.createdAt
               }
             }
-          },
-          metric: {
-            data: {
-              type: "metric",
-              attributes: {
-                name: "New Booking Alert"
-              }
-            }
-          },
-          properties: {
-            guest_name: booking.guestName,
-            guest_email: booking.email,
-            guest_phone: booking.phone,
-            check_in: booking.checkIn,
-            check_out: booking.checkOut,
-            nights: booking.nights,
-            guests: booking.guests,
-            total_amount: booking.total,
-            property_name: booking.propertyName,
-            property_code: booking.propertyCode,
-            listing_id: booking.listingId,
-            payment_id: booking.paymentId,
-            booking_id: booking.id,
-            created_at: booking.createdAt
           }
-        }
-      }
-    })
-  });
+        })
+      });
 
-  if (response.ok) {
-    console.log('📧 Booking notification sent to Klaviyo successfully');
-  } else {
-    console.error('❌ Failed to send to Klaviyo:', await response.text());
-  }
-} catch (error) {
-  console.error('❌ Error sending booking notification:', error);
-  emailError('KLAVIYO_NOTIFICATION_FAILED', {
-    error: error.message,
-    guest_name: booking.guestName,
-    guest_email: booking.email,
-    booking_id: booking.id
-  });
-}
+      if (response.ok) {
+        console.log('📧 Booking notification sent to Klaviyo successfully');
+      } else {
+        console.error('❌ Failed to send to Klaviyo:', await response.text());
+      }
+    } catch (error) {
+      console.error('❌ Error sending booking notification:', error);
+      emailError('KLAVIYO_NOTIFICATION_FAILED', {
+        error: error.message,
+        guest_name: booking.guestName,
+        guest_email: booking.email,
+        booking_id: booking.id
+      });
+    }
+    
     console.log(`📊 Total bookings for ${propertyCode}:`, bookingsByProperty[propertyCode].length);
   }
 
@@ -507,4 +614,7 @@ app.get('/bookings/:propertyCode?', (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
