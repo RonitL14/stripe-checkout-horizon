@@ -213,7 +213,6 @@ app.post('/create-payment-intent', async (req, res) => {
   try {
     const { checkIn: checkInDate, checkOut: checkOutDate, nights, baseRate, cleaningFee } = booking;
 
-    // ADD THESE DEBUG LINES HERE:
     console.log('🔍 Full request body:', req.body);
     console.log('🔍 Booking data received:', booking);
     console.log('🔍 CheckIn:', checkInDate, 'CheckOut:', checkOutDate);
@@ -228,8 +227,8 @@ app.post('/create-payment-intent', async (req, res) => {
       return res.status(400).json({ error: 'Invalid booking dates' });
     }
     
-    // AUTO-DETECT PROPERTY - Get LISTING_ID from your booking widget
-    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82'; // Default to Colorado Springs
+    // AUTO-DETECT PROPERTY
+    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82';
     const property = PROPERTY_MAP[listingId];
     
     console.log('🏠 Detected property:', listingId, '→', property ? property.name : 'Unknown');
@@ -237,6 +236,9 @@ app.post('/create-payment-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount,
       currency: 'usd',
+      automatic_payment_methods: {
+        enabled: true,
+      },
       metadata: {
         customer_email: email,
         customer_name: name,
