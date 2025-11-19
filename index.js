@@ -206,14 +206,13 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// Payment intent endpoint - AUTO-DETECTS PROPERTY FROM LISTING_ID
+// Payment intent endpoint with AUTOMATIC PAYMENT METHODS
 app.post('/create-payment-intent', async (req, res) => {
   const { amount, email, name, phone, booking } = req.body;
   
   try {
     const { checkIn: checkInDate, checkOut: checkOutDate, nights, baseRate, cleaningFee } = booking;
 
-    // ADD THESE DEBUG LINES HERE:
     console.log('🔍 Full request body:', req.body);
     console.log('🔍 Booking data received:', booking);
     console.log('🔍 CheckIn:', checkInDate, 'CheckOut:', checkOutDate);
@@ -228,8 +227,8 @@ app.post('/create-payment-intent', async (req, res) => {
       return res.status(400).json({ error: 'Invalid booking dates' });
     }
     
-    // AUTO-DETECT PROPERTY - Get LISTING_ID from your booking widget
-    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82'; // Default to Colorado Springs
+    // AUTO-DETECT PROPERTY
+    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82';
     const property = PROPERTY_MAP[listingId];
     
     console.log('🏠 Detected property:', listingId, '→', property ? property.name : 'Unknown');
@@ -237,6 +236,9 @@ app.post('/create-payment-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount,
       currency: 'usd',
+      automatic_payment_methods: {
+        enabled: true,
+      },
       metadata: {
         customer_email: email,
         customer_name: name,
@@ -267,110 +269,6 @@ app.post('/create-payment-intent', async (req, res) => {
       listing_id: booking.listingId
     });
     res.status(500).json({ error: error.message });
-  }
-});
-
-// 🆕 NEW - Create Bank Session for ACH payments
-app.post('/create-bank-session', async (req, res) => {
-  try {
-    const { email, name, amount, booking } = req.body;
-
-    console.log('🏦 Creating bank session for:', email);
-
-    const session = await stripe.financialConnections.sessions.create({
-      account_holder: {
-        type: 'customer',
-        customer: email,
-      },
-      permissions: ['payment_method', 'balances'],
-      filters: {
-        countries: ['US'],
-      },
-    });
-
-    console.log('✅ Bank session created:', session.id);
-    res.json({ client_secret: session.client_secret });
-  } catch (error) {
-    console.error('❌ Error creating bank session:', error);
-    emailError('BANK_SESSION_CREATION_FAILED', {
-      error: error.message,
-      user_email: req.body.email,
-      user_name: req.body.name
-    });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 🆕 NEW - Confirm Bank Payment
-app.post('/confirm-bank-payment', async (req, res) => {
-  try {
-    const { accountId, email, name, phone, booking } = req.body;
-
-    console.log('🏦 Confirming bank payment for:', email, 'Account:', accountId);
-
-    // Create payment method from the linked bank account
-    const paymentMethod = await stripe.paymentMethods.create({
-      type: 'us_bank_account',
-      us_bank_account: {
-        financial_connections_account: accountId,
-      },
-    });
-
-    console.log('✅ Payment method created:', paymentMethod.id);
-
-    // Calculate amount
-    const subtotal = (booking.baseRate * booking.nights) + booking.cleaningFee;
-    const taxAmount = subtotal * (booking.taxRate || 0);
-    const totalWithTax = subtotal + taxAmount;
-    const amount = Math.round(totalWithTax * 100);
-
-    // AUTO-DETECT PROPERTY
-    const listingId = booking.listingId || '869f5e1f-223b-4cc2-b64a-a0f4b8194c82';
-    const property = PROPERTY_MAP[listingId];
-
-    // Create payment intent
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount,
-      currency: 'usd',
-      payment_method: paymentMethod.id,
-      payment_method_types: ['us_bank_account'],
-      confirm: true,
-      mandate_data: {
-        customer_acceptance: {
-          type: 'online',
-          online: {
-            ip_address: req.ip,
-            user_agent: req.headers['user-agent'],
-          },
-        },
-      },
-      metadata: {
-        customer_email: email,
-        customer_name: name,
-        customer_phone: phone,
-        check_in: booking.checkIn,
-        check_out: booking.checkOut,
-        nights: booking.nights.toString(),
-        guests: booking.guests.toString(),
-        base_rate: booking.baseRate.toString(),
-        cleaning_fee: booking.cleaningFee.toString(),
-        listing_id: listingId,
-        property_code: property ? property.code : 'cos1',
-        payment_type: 'ach'
-      }
-    });
-
-    console.log('✅ Bank payment confirmed:', paymentIntent.id);
-    res.json({ success: true, paymentIntent });
-  } catch (error) {
-    console.error('❌ Error confirming bank payment:', error);
-    emailError('BANK_PAYMENT_CONFIRMATION_FAILED', {
-      error: error.message,
-      user_email: req.body.email,
-      user_name: req.body.name,
-      account_id: req.body.accountId
-    });
-    res.status(500).json({ success: false, error: error.message });
   }
 });
 
